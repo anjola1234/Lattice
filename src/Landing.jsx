@@ -1,421 +1,649 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
+/* ─── Logo Mark ─────────────────────────────────────────── */
+function LatticeMark({ size = 28 }) {
+  const cx = size / 2
+  const r  = size * 0.38
+  const spokes = Array.from({ length: 6 }, (_, i) => {
+    const a = (i * Math.PI * 2) / 6 - Math.PI / 2
+    return { x: cx + r * Math.cos(a), y: cx + r * Math.sin(a) }
+  })
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} fill="none" aria-hidden="true">
+      {spokes.map((pt, i) => (
+        <line key={i} x1={cx} y1={cx} x2={pt.x} y2={pt.y}
+          stroke="#F59E0B" strokeWidth="1.5" strokeLinecap="round" />
+      ))}
+      <circle cx={cx} cy={cx} r={r} stroke="#F59E0B" strokeWidth="1.5" fill="none" opacity="0.22" />
+      <circle cx={cx} cy={cx} r="2.5" fill="#F59E0B" />
+    </svg>
+  )
+}
+
+/* ─── Animated Network Canvas ───────────────────────────── */
 function NetworkCanvas() {
-  const canvasRef = useRef(null)
+  const ref = useRef(null)
 
   useEffect(() => {
-    const canvas = canvasRef.current
+    const canvas = ref.current
     if (!canvas) return
     const ctx = canvas.getContext('2d')
-    const W = canvas.offsetWidth
-    const H = canvas.offsetHeight
-    canvas.width = W
-    canvas.height = H
+    let raf
 
-    const nodes = []
-    const NUM = 60
-    for (let i = 0; i < NUM; i++) {
-      const isHub = i < 6
-      const isConnector = i < 18
-      nodes.push({
-        x: W * 0.2 + Math.random() * W * 0.6,
-        y: H * 0.15 + Math.random() * H * 0.7,
-        vx: (Math.random() - 0.5) * 0.18,
-        vy: (Math.random() - 0.5) * 0.18,
-        r: isHub ? 10 + Math.random() * 7 : isConnector ? 5 + Math.random() * 4 : 2 + Math.random() * 3,
-        color: isHub ? '#ffffff' : isConnector ? '#a78bfa' : '#f59e0b',
-        pulse: Math.random() * Math.PI * 2,
-        pulseSpeed: 0.02 + Math.random() * 0.02,
-        isHub,
-      })
+    const setSize = () => {
+      const dpr = window.devicePixelRatio || 1
+      const w = canvas.offsetWidth
+      const h = canvas.offsetHeight
+      canvas.width  = w * dpr
+      canvas.height = h * dpr
+      ctx.scale(dpr, dpr)
     }
+    setSize()
+    window.addEventListener('resize', setSize)
 
-    const edges = []
-    for (let i = 0; i < NUM; i++) {
-      const maxConn = i < 6 ? 8 : i < 18 ? 4 : 2
-      const conns = Math.floor(Math.random() * maxConn) + 1
-      for (let c = 0; c < conns; c++) {
-        const target = Math.floor(Math.random() * Math.min(i < 6 ? 18 : 6, NUM))
-        if (target !== i) edges.push([i, target])
-      }
-    }
+    const W = () => canvas.offsetWidth
+    const H = () => canvas.offsetHeight
 
-    let frame
-    function draw() {
-      ctx.clearRect(0, 0, W, H)
-      edges.forEach(([a, b]) => {
-        const na = nodes[a]
-        const nb = nodes[b]
-        const dist = Math.hypot(na.x - nb.x, na.y - nb.y)
-        if (dist > 280) return
-        const alpha = Math.max(0, (1 - dist / 280) * 0.25)
+    // 8 hub nodes with organic movement
+    const hubs = Array.from({ length: 8 }, (_, i) => ({
+      x: W() * 0.12 + Math.random() * W() * 0.76,
+      y: H() * 0.12 + Math.random() * H() * 0.76,
+      vx: (Math.random() - 0.5) * 0.14,
+      vy: (Math.random() - 0.5) * 0.14,
+      phase: (i / 8) * Math.PI * 2,
+    }))
+
+    // 52 leaf nodes, each assigned to a hub
+    const leaves = Array.from({ length: 52 }, (_, i) => ({
+      x: W() * 0.05 + Math.random() * W() * 0.9,
+      y: H() * 0.05 + Math.random() * H() * 0.9,
+      vx: (Math.random() - 0.5) * 0.2,
+      vy: (Math.random() - 0.5) * 0.2,
+      r: Math.random() * 1.6 + 0.4,
+      alpha: Math.random() * 0.32 + 0.12,
+      hub: i % 8,
+    }))
+
+    const draw = (ts) => {
+      ctx.clearRect(0, 0, W(), H())
+
+      // Leaf → hub spokes
+      leaves.forEach(leaf => {
+        const hub = hubs[leaf.hub]
+        const dx = leaf.x - hub.x
+        const dy = leaf.y - hub.y
+        const d  = Math.sqrt(dx * dx + dy * dy)
+        if (d > 200) return
+        const a = (1 - d / 200) * 0.17
         ctx.beginPath()
-        ctx.moveTo(na.x, na.y)
-        ctx.lineTo(nb.x, nb.y)
-        ctx.strokeStyle = `rgba(124, 58, 237, ${alpha})`
-        ctx.lineWidth = 0.8
+        ctx.strokeStyle = `rgba(245,158,11,${a})`
+        ctx.lineWidth = 0.6
+        ctx.moveTo(leaf.x, leaf.y)
+        ctx.lineTo(hub.x, hub.y)
         ctx.stroke()
       })
-      nodes.forEach(node => {
-        node.pulse += node.pulseSpeed
-        const glow = node.isHub ? (0.7 + Math.sin(node.pulse) * 0.3) : 1
-        if (node.isHub) {
-          const gradient = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, node.r * 3.5)
-          gradient.addColorStop(0, `rgba(167, 139, 250, ${0.25 * glow})`)
-          gradient.addColorStop(1, 'rgba(167, 139, 250, 0)')
+
+      // Hub ↔ hub connections
+      hubs.forEach((a, i) => {
+        hubs.forEach((b, j) => {
+          if (j <= i) return
+          const dx = a.x - b.x
+          const dy = a.y - b.y
+          const d  = Math.sqrt(dx * dx + dy * dy)
+          if (d > 320) return
+          const alpha = (1 - d / 320) * 0.11
           ctx.beginPath()
-          ctx.arc(node.x, node.y, node.r * 3.5, 0, Math.PI * 2)
-          ctx.fillStyle = gradient
-          ctx.fill()
-        }
+          ctx.strokeStyle = `rgba(245,158,11,${alpha})`
+          ctx.lineWidth = 0.9
+          ctx.moveTo(a.x, a.y)
+          ctx.lineTo(b.x, b.y)
+          ctx.stroke()
+        })
+      })
+
+      // Draw leaf nodes
+      leaves.forEach(node => {
         ctx.beginPath()
-        ctx.arc(node.x, node.y, node.r * glow, 0, Math.PI * 2)
-        ctx.fillStyle = node.color
-        ctx.globalAlpha = node.isHub ? 0.95 : 0.75
+        ctx.arc(node.x, node.y, node.r, 0, Math.PI * 2)
+        ctx.fillStyle = `rgba(245,158,11,${node.alpha})`
         ctx.fill()
-        ctx.globalAlpha = 1
+
         node.x += node.vx
         node.y += node.vy
-        if (node.x < 10 || node.x > W - 10) node.vx *= -1
-        if (node.y < 10 || node.y > H - 10) node.vy *= -1
+        if (node.x < 0 || node.x > W()) node.vx *= -1
+        if (node.y < 0 || node.y > H()) node.vy *= -1
       })
-      frame = requestAnimationFrame(draw)
+
+      // Draw hub nodes with pulse glow
+      hubs.forEach(hub => {
+        const pulse = 0.72 + Math.sin(ts * 0.0008 + hub.phase) * 0.28
+        const glow  = 18 * pulse
+
+        const g = ctx.createRadialGradient(hub.x, hub.y, 0, hub.x, hub.y, glow)
+        g.addColorStop(0, `rgba(245,158,11,${0.28 * pulse})`)
+        g.addColorStop(1, 'rgba(245,158,11,0)')
+        ctx.beginPath()
+        ctx.arc(hub.x, hub.y, glow, 0, Math.PI * 2)
+        ctx.fillStyle = g
+        ctx.fill()
+
+        ctx.beginPath()
+        ctx.arc(hub.x, hub.y, 3 * pulse, 0, Math.PI * 2)
+        ctx.fillStyle = '#F59E0B'
+        ctx.fill()
+
+        hub.x += hub.vx
+        hub.y += hub.vy
+        if (hub.x < 0 || hub.x > W()) hub.vx *= -1
+        if (hub.y < 0 || hub.y > H()) hub.vy *= -1
+      })
+
+      raf = requestAnimationFrame(draw)
     }
-    draw()
-    return () => cancelAnimationFrame(frame)
+
+    raf = requestAnimationFrame(draw)
+    return () => {
+      cancelAnimationFrame(raf)
+      window.removeEventListener('resize', setSize)
+    }
   }, [])
 
-  return <canvas ref={canvasRef} style={{ width: '100%', height: '100%', display: 'block' }} />
+  return (
+    <canvas
+      ref={ref}
+      style={{ display: 'block', width: '100%', height: '100%' }}
+      aria-hidden="true"
+    />
+  )
 }
 
-function Counter({ target, suffix = '' }) {
-  const [count, setCount] = useState(0)
-  const ref = useRef(null)
+/* ─── Animated Counter ──────────────────────────────────── */
+function Counter({ end, suffix = '', label }) {
+  const [val, setVal] = useState(0)
+  const ref     = useRef(null)
+  const started = useRef(false)
+
   useEffect(() => {
-    const observer = new IntersectionObserver(([entry]) => {
-      if (!entry.isIntersecting) return
-      observer.disconnect()
-      let start = 0
-      const duration = 1800
-      const step = (timestamp) => {
-        if (!start) start = timestamp
-        const progress = Math.min((timestamp - start) / duration, 1)
-        setCount(Math.floor(progress * target))
-        if (progress < 1) requestAnimationFrame(step)
+    const obs = new IntersectionObserver(([entry]) => {
+      if (!entry.isIntersecting || started.current) return
+      started.current = true
+      obs.disconnect()
+      const t0  = Date.now()
+      const dur = 1300
+      const tick = () => {
+        const p = Math.min((Date.now() - t0) / dur, 1)
+        setVal(Math.round((1 - Math.pow(1 - p, 3)) * end))
+        if (p < 1) requestAnimationFrame(tick)
       }
-      requestAnimationFrame(step)
+      requestAnimationFrame(tick)
     }, { threshold: 0.3 })
-    if (ref.current) observer.observe(ref.current)
-    return () => observer.disconnect()
-  }, [target])
-  return <span ref={ref}>{count.toLocaleString()}{suffix}</span>
-}
 
-export default function Landing() {
-  const navigate = useNavigate()
+    if (ref.current) obs.observe(ref.current)
+    return () => obs.disconnect()
+  }, [end])
 
   return (
-    <div style={{ background: '#09090b', color: '#ffffff', fontFamily: "'Inter', system-ui, sans-serif", overflowX: 'hidden' }}>
+    <div ref={ref} style={{ textAlign: 'center' }}>
+      <div style={{
+        fontSize: 'clamp(28px, 5vw, 40px)', fontWeight: 800,
+        color: 'var(--t1)', letterSpacing: '-0.03em',
+        fontVariantNumeric: 'tabular-nums', lineHeight: 1,
+      }}>
+        {val.toLocaleString()}{suffix}
+      </div>
+      <div style={{
+        fontSize: 11, color: 'var(--t3)', textTransform: 'uppercase',
+        letterSpacing: '0.10em', fontWeight: 600, marginTop: 7,
+      }}>
+        {label}
+      </div>
+    </div>
+  )
+}
 
-      {/* NAV */}
+/* ─── Feature Card ──────────────────────────────────────── */
+function FeatureCard({ icon, title, desc, delay = 0 }) {
+  const [hov, setHov] = useState(false)
+  return (
+    <div
+      className={`a-fade d${Math.ceil(delay / 80)}`}
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{ height: '100%' }}
+    >
+      <div style={{
+        height: '100%',
+        background:    hov ? 'var(--s2)' : 'var(--s1)',
+        border:        `1px solid ${hov ? 'rgba(245,158,11,0.25)' : 'var(--b1)'}`,
+        borderRadius:  'var(--rl)',
+        padding:       'clamp(18px, 3vw, 26px)',
+        transition:    'all 0.22s',
+        transform:     hov ? 'translateY(-2px)' : 'none',
+        boxShadow:     hov ? '0 16px 40px rgba(0,0,0,0.35)' : 'none',
+      }}>
+        <div style={{
+          width: 38, height: 38,
+          background: 'var(--gold-dim)',
+          border: '1px solid rgba(245,158,11,0.14)',
+          borderRadius: 10,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          marginBottom: 16,
+        }}>
+          {icon}
+        </div>
+        <h3 style={{ fontSize: 15, fontWeight: 700, color: 'var(--t1)', margin: '0 0 8px', letterSpacing: '-0.01em' }}>
+          {title}
+        </h3>
+        <p style={{ fontSize: 13, color: 'var(--t2)', margin: 0, lineHeight: 1.68 }}>
+          {desc}
+        </p>
+      </div>
+    </div>
+  )
+}
+
+/* ─── Icon Shortcuts ────────────────────────────────────── */
+const Icon = ({ d, size = 16 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
+    stroke="#F59E0B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    {typeof d === 'string'
+      ? <path d={d} />
+      : d.map((p, i) => <path key={i} d={p} />)}
+  </svg>
+)
+
+/* ─── Landing Page ──────────────────────────────────────── */
+export default function Landing() {
+  const nav        = useNavigate()
+  const [scrolled, setScrolled] = useState(false)
+  const featuresRef = useRef(null)
+
+  useEffect(() => {
+    const fn = () => setScrolled(window.scrollY > 20)
+    window.addEventListener('scroll', fn, { passive: true })
+    return () => window.removeEventListener('scroll', fn)
+  }, [])
+
+  const scrollTo = (ref) =>
+    ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+
+  return (
+    <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
+
+      {/* ══ NAV ══════════════════════════════════════════════ */}
       <nav style={{
         position: 'fixed', top: 0, left: 0, right: 0, zIndex: 100,
+        height: 64,
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '0 48px', height: '60px',
-        background: 'rgba(9,9,11,0.85)',
-        backdropFilter: 'blur(12px)',
-        borderBottom: '1px solid rgba(124,58,237,0.15)',
+        padding: '0 clamp(16px, 5vw, 48px)',
+        background: scrolled ? 'rgba(5,9,18,0.92)' : 'transparent',
+        backdropFilter: scrolled ? 'blur(20px)' : 'none',
+        borderBottom: `1px solid ${scrolled ? 'var(--b1)' : 'transparent'}`,
+        transition: 'all 0.3s',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div style={{
-            width: '30px', height: '30px',
-            background: 'linear-gradient(135deg, #7c3aed, #f59e0b)',
-            borderRadius: '7px', display: 'flex', alignItems: 'center',
-            justifyContent: 'center', fontSize: '16px',
-          }}>⚡</div>
-          <span style={{ fontWeight: 800, fontSize: '18px', letterSpacing: '-0.5px' }}>Lattice</span>
+        {/* Wordmark */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+          <LatticeMark size={24} />
+          <span style={{ fontSize: 16, fontWeight: 800, color: 'var(--t1)', letterSpacing: '-0.025em' }}>
+            Lattice
+          </span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '36px' }}>
-          {['Features', 'How It Works', 'About'].map(link => (
-            <a key={link} href={`#${link.toLowerCase().replace(/ /g, '-')}`}
-              style={{ color: '#a1a1aa', fontSize: '14px', textDecoration: 'none' }}
-              onMouseEnter={e => e.target.style.color = '#ffffff'}
-              onMouseLeave={e => e.target.style.color = '#a1a1aa'}
-            >{link}</a>
-          ))}
-          <button onClick={() => navigate('/explorer')} style={{
-            background: 'linear-gradient(135deg, #7c3aed, #6d28d9)',
-            color: '#ffffff', border: 'none', borderRadius: '8px',
-            padding: '8px 20px', fontSize: '14px', fontWeight: 600, cursor: 'pointer',
-          }}>Launch Explorer →</button>
+
+        {/* Right side */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button
+            className="btn btn-ghost nav-links"
+            style={{ padding: '8px 14px', fontSize: 13 }}
+            onClick={() => scrollTo(featuresRef)}
+          >
+            Features
+          </button>
+          <button
+            className="btn btn-gold"
+            style={{ padding: '9px 18px', fontSize: 13 }}
+            onClick={() => nav('/explorer')}
+          >
+            Launch Explorer
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" />
+            </svg>
+          </button>
         </div>
       </nav>
 
-      {/* HERO */}
+      {/* ══ HERO ══════════════════════════════════════════════ */}
       <section style={{
-        minHeight: '100vh', display: 'grid', gridTemplateColumns: '1fr 1fr',
-        alignItems: 'center', padding: '100px 48px 60px', gap: '48px',
-        maxWidth: '1400px', margin: '0 auto',
+        position: 'relative',
+        minHeight: '100vh',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        overflow: 'hidden',
+        padding: 'clamp(80px, 12vh, 120px) clamp(16px, 5vw, 48px) 60px',
       }}>
-        <div>
-          <div style={{
-            display: 'inline-flex', alignItems: 'center', gap: '8px',
-            background: 'rgba(124,58,237,0.12)', border: '1px solid rgba(124,58,237,0.3)',
-            borderRadius: '100px', padding: '6px 14px', marginBottom: '32px',
-          }}>
-            <span style={{ width: '6px', height: '6px', background: '#7c3aed', borderRadius: '50%', display: 'inline-block' }} />
-            <span style={{ color: '#a78bfa', fontSize: '13px', fontWeight: 500 }}>Bitcoin Infrastructure Tooling</span>
-          </div>
-          <h1 style={{ fontSize: 'clamp(40px, 5vw, 64px)', fontWeight: 800, lineHeight: 1.08, letterSpacing: '-2px', margin: '0 0 24px' }}>
-            The Lightning<br />Network,{' '}
-            <span style={{ background: 'linear-gradient(90deg, #7c3aed, #f59e0b)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
-              made visible.
-            </span>
-          </h1>
-          <p style={{ color: '#a1a1aa', fontSize: '18px', lineHeight: 1.7, maxWidth: '480px', margin: '0 0 40px' }}>
-            Lattice maps the topology of the Bitcoin Lightning Network. Explore 500+ nodes,
-            1,310 payment channels, and centrality scores — rendered as a live, interactive
-            graph you can search, zoom, and navigate.
-          </p>
-          <div style={{ display: 'flex', gap: '14px', alignItems: 'center', marginBottom: '48px' }}>
-            <button onClick={() => navigate('/explorer')} style={{
-              background: 'linear-gradient(135deg, #f59e0b, #d97706)',
-              color: '#09090b', border: 'none', borderRadius: '10px',
-              padding: '14px 28px', fontSize: '16px', fontWeight: 700, cursor: 'pointer',
-            }}>Launch Explorer →</button>
-            <a href="https://github.com" style={{
-              color: '#a1a1aa', fontSize: '15px', textDecoration: 'none',
-              border: '1px solid #27272a', borderRadius: '10px', padding: '14px 24px',
-            }}>View on GitHub</a>
-          </div>
-          <div style={{ display: 'flex', gap: '32px' }}>
-            {[{ value: '500+', label: 'Nodes' }, { value: '1,310', label: 'Channels' }, { value: '4', label: 'Node Tiers' }].map(stat => (
-              <div key={stat.label}>
-                <div style={{ fontFamily: 'monospace', fontSize: '22px', fontWeight: 700 }}>{stat.value}</div>
-                <div style={{ fontSize: '12px', color: '#71717a', marginTop: '2px' }}>{stat.label}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div style={{
-          height: '520px', borderRadius: '20px', overflow: 'hidden',
-          border: '1px solid rgba(124,58,237,0.25)',
-          background: 'rgba(124,58,237,0.04)',
-          boxShadow: '0 0 60px rgba(124,58,237,0.12)',
-          position: 'relative',
-        }}>
+        {/* Canvas network */}
+        <div style={{ position: 'absolute', inset: 0 }}>
           <NetworkCanvas />
-          <div style={{
-            position: 'absolute', top: '16px', left: '16px',
-            display: 'flex', alignItems: 'center', gap: '6px',
-            background: 'rgba(9,9,11,0.75)', backdropFilter: 'blur(8px)',
-            border: '1px solid rgba(124,58,237,0.2)',
-            borderRadius: '100px', padding: '5px 12px',
-          }}>
-            <span style={{ width: '6px', height: '6px', background: '#22c55e', borderRadius: '50%', display: 'inline-block', boxShadow: '0 0 6px #22c55e' }} />
-            <span style={{ fontSize: '11px', color: '#a1a1aa' }}>Live Network Data</span>
-          </div>
-          <div style={{
-            position: 'absolute', bottom: '28px', right: '24px',
-            background: 'rgba(15,23,42,0.95)', backdropFilter: 'blur(8px)',
-            border: '1px solid rgba(124,58,237,0.2)',
-            borderRadius: '8px', padding: '8px 14px', fontSize: '12px',
-          }}>
-            <span style={{ color: '#f59e0b', fontWeight: 700 }}>ACINQ</span>
-            <span style={{ color: '#71717a', margin: '0 6px' }}>·</span>
-            <span style={{ color: '#a1a1aa' }}>53 channels</span>
-            <span style={{ color: '#71717a', margin: '0 6px' }}>·</span>
-            <span style={{ color: '#a78bfa' }}>Major Hub</span>
-          </div>
         </div>
-      </section>
 
-      {/* STATS BAR */}
-      <section style={{
-        background: 'linear-gradient(90deg, rgba(124,58,237,0.08), rgba(124,58,237,0.14), rgba(124,58,237,0.08))',
-        borderTop: '1px solid rgba(124,58,237,0.15)',
-        borderBottom: '1px solid rgba(124,58,237,0.15)',
-        padding: '40px 48px',
-      }}>
+        {/* Radial glow */}
         <div style={{
-          maxWidth: '900px', margin: '0 auto',
-          display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)',
-          textAlign: 'center', gap: '24px',
-        }}>
-          {[
-            { target: 500, suffix: '+', label: 'Network Nodes' },
-            { target: 1310, suffix: '+', label: 'Payment Channels' },
-            { target: 4, suffix: '', label: 'Node Tiers' },
-            { target: 100, suffix: '%', label: 'Open Data' },
-          ].map(stat => (
-            <div key={stat.label}>
-              <div style={{ fontFamily: 'monospace', fontSize: '40px', fontWeight: 800, lineHeight: 1 }}>
-                <Counter target={stat.target} suffix={stat.suffix} />
-              </div>
-              <div style={{ color: '#71717a', fontSize: '13px', marginTop: '8px', letterSpacing: '0.05em', textTransform: 'uppercase' }}>{stat.label}</div>
-            </div>
-          ))}
-        </div>
-      </section>
-{/* WHAT IS THE LIGHTNING NETWORK */}
-      <section id="about" style={{ padding: '120px 48px', maxWidth: '1200px', margin: '0 auto' }}>
-        <div style={{ textAlign: 'center', marginBottom: '64px' }}>
-          <div style={{ color: '#7c3aed', fontSize: '12px', fontWeight: 600, letterSpacing: '0.15em', textTransform: 'uppercase', marginBottom: '16px' }}>The Basics</div>
-          <h2 style={{ fontSize: 'clamp(28px, 4vw, 48px)', fontWeight: 800, letterSpacing: '-1.5px', margin: '0 0 20px' }}>Bitcoin payments at the speed of light.</h2>
-          <p style={{ color: '#71717a', fontSize: '17px', maxWidth: '560px', margin: '0 auto', lineHeight: 1.7 }}>
-            The Lightning Network is a second-layer protocol built on Bitcoin. Before you can explore it, here is what you are looking at.
-          </p>
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '24px' }}>
-          {[
-            { icon: '⚡', title: 'Payment Channels', body: 'Two parties lock Bitcoin into a shared channel and transact instantly — settling on-chain only when the channel closes.' },
-            { icon: '🕸️', title: 'Routing Network', body: 'Payments flow through interconnected nodes, finding paths automatically across thousands of channels in milliseconds.' },
-            { icon: '🔭', title: 'Open Graph', body: 'The full network topology is publicly visible — every node, every channel, every connection available for anyone to explore.' },
-          ].map(card => (
-            <div key={card.title}
-              style={{
-                background: 'rgba(124,58,237,0.05)', border: '1px solid rgba(124,58,237,0.15)',
-                borderRadius: '16px', padding: '32px', transition: 'border-color 0.2s, background 0.2s',
-              }}
-              onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(124,58,237,0.4)'; e.currentTarget.style.background = 'rgba(124,58,237,0.10)' }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(124,58,237,0.15)'; e.currentTarget.style.background = 'rgba(124,58,237,0.05)' }}
-            >
-              <div style={{ fontSize: '28px', marginBottom: '16px' }}>{card.icon}</div>
-              <h3 style={{ fontSize: '18px', fontWeight: 700, margin: '0 0 12px', color: '#ffffff' }}>{card.title}</h3>
-              <p style={{ color: '#71717a', fontSize: '15px', lineHeight: 1.7, margin: 0 }}>{card.body}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* FEATURES */}
-      <section id="features" style={{ padding: '80px 48px 120px', background: 'rgba(124,58,237,0.03)' }}>
-        <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-          <div style={{ textAlign: 'center', marginBottom: '72px' }}>
-            <div style={{ color: '#7c3aed', fontSize: '12px', fontWeight: 600, letterSpacing: '0.15em', textTransform: 'uppercase', marginBottom: '16px' }}>Features</div>
-            <h2 style={{ fontSize: 'clamp(28px, 4vw, 48px)', fontWeight: 800, letterSpacing: '-1.5px', margin: 0 }}>Everything you need to understand the network.</h2>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '80px' }}>
-            {[
-              { title: 'Interactive Graph Visualization', body: 'Lattice renders the full Lightning Network topology as a force-directed graph. Nodes are sized and colored by centrality score — major hubs glow white at the center, leaf nodes sit quietly at the edges. Zoom, pan, and explore at your own pace.', icon: '🗺️', flip: false },
-              { title: 'Search Any Node Instantly', body: 'Type any node name and Lattice highlights it immediately — zooming in, revealing direct connections, and showing a full info panel with channel count, capacity, and centrality score. Find any node in a 500-node network in under a second.', icon: '🔍', flip: true },
-              { title: 'Centrality and Network Role', body: 'Every node is scored by degree centrality and classified as a Major Hub, Connector, Relay Node, or Leaf Node. Understand who controls the most routing power in the network at a glance.', icon: '📊', flip: false },
-            ].map(feature => (
-              <div key={feature.title} style={{
-                display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '64px', alignItems: 'center',
-                direction: feature.flip ? 'rtl' : 'ltr',
-              }}>
-                <div style={{ direction: 'ltr' }}>
-                  <div style={{ fontSize: '36px', marginBottom: '20px' }}>{feature.icon}</div>
-                  <h3 style={{ fontSize: '28px', fontWeight: 800, letterSpacing: '-0.5px', margin: '0 0 16px' }}>{feature.title}</h3>
-                  <p style={{ color: '#71717a', fontSize: '16px', lineHeight: 1.8, margin: '0 0 28px' }}>{feature.body}</p>
-                  <button onClick={() => navigate('/explorer')} style={{
-                    background: 'transparent', color: '#a78bfa',
-                    border: '1px solid rgba(124,58,237,0.4)', borderRadius: '8px',
-                    padding: '10px 20px', fontSize: '14px', fontWeight: 600, cursor: 'pointer',
-                  }}>Try it in the Explorer →</button>
-                </div>
-                <div style={{ direction: 'ltr' }}>
-                  <div style={{
-                    height: '260px', borderRadius: '16px',
-                    background: 'linear-gradient(135deg, rgba(124,58,237,0.08), rgba(9,9,11,0.8))',
-                    border: '1px solid rgba(124,58,237,0.2)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: '64px', boxShadow: '0 0 40px rgba(124,58,237,0.08)',
-                  }}>{feature.icon}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* WHY IT MATTERS */}
-      <section id="how-it-works" style={{ padding: '120px 48px', maxWidth: '1200px', margin: '0 auto' }}>
-        <div style={{ textAlign: 'center', marginBottom: '64px' }}>
-          <div style={{ color: '#f59e0b', fontSize: '12px', fontWeight: 600, letterSpacing: '0.15em', textTransform: 'uppercase', marginBottom: '16px' }}>Why Lattice</div>
-          <h2 style={{ fontSize: 'clamp(28px, 4vw, 48px)', fontWeight: 800, letterSpacing: '-1.5px', margin: '0 0 20px' }}>
-            The Lightning Network is complex.{' '}
-            <span style={{ background: 'linear-gradient(90deg, #7c3aed, #f59e0b)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
-              Lattice makes it legible.
-            </span>
-          </h2>
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '24px' }}>
-          {[
-            { icon: '⚙️', title: 'For Node Operators', body: 'Understand your position in the network, identify well-connected peers, and make smarter decisions about which channels to open.' },
-            { icon: '🔬', title: 'For Researchers', body: 'Analyze real network topology, centrality distribution, and graph structure. Visualize scale-free network properties in an actual deployed system.' },
-            { icon: '👩‍💻', title: 'For Developers', body: 'Explore the data layer behind Lightning without touching payments or wallets. Understand graph structure before building routing logic.' },
-            { icon: '🧭', title: 'For Curious Minds', body: "See Bitcoin's payment infrastructure as a living network graph. No wallet needed, no Bitcoin required — just curiosity about how the system works." },
-          ].map(item => (
-            <div key={item.title}
-              style={{
-                display: 'flex', gap: '20px',
-                background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)',
-                borderRadius: '16px', padding: '28px', transition: 'border-color 0.2s',
-              }}
-              onMouseEnter={e => e.currentTarget.style.borderColor = 'rgba(124,58,237,0.3)'}
-              onMouseLeave={e => e.currentTarget.style.borderColor = 'rgba(255,255,255,0.06)'}
-            >
-              <div style={{ fontSize: '28px', flexShrink: 0 }}>{item.icon}</div>
-              <div>
-                <h3 style={{ fontSize: '17px', fontWeight: 700, margin: '0 0 10px' }}>{item.title}</h3>
-                <p style={{ color: '#71717a', fontSize: '15px', lineHeight: 1.7, margin: 0 }}>{item.body}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* FINAL CTA */}
-      <section style={{ padding: '120px 48px', textAlign: 'center', position: 'relative', overflow: 'hidden' }}>
-        <div style={{
-          position: 'absolute', top: '50%', left: '50%',
-          transform: 'translate(-50%, -50%)',
-          width: '600px', height: '400px',
-          background: 'radial-gradient(ellipse, rgba(124,58,237,0.15) 0%, transparent 70%)',
+          position: 'absolute', inset: 0,
+          background: 'radial-gradient(ellipse 70% 55% at 50% 42%, rgba(245,158,11,0.07) 0%, transparent 68%)',
           pointerEvents: 'none',
         }} />
-        <div style={{ position: 'relative', zIndex: 1 }}>
-          <h2 style={{ fontSize: 'clamp(32px, 5vw, 56px)', fontWeight: 800, letterSpacing: '-2px', margin: '0 0 20px' }}>
-            Ready to explore the network?
-          </h2>
-          <p style={{ color: '#71717a', fontSize: '18px', maxWidth: '480px', margin: '0 auto 40px', lineHeight: 1.7 }}>
-            Launch Lattice and see the Lightning Network like never before. No account needed. No payments. Just data.
+
+        {/* Dark overlay for contrast */}
+        <div style={{ position: 'absolute', inset: 0, background: 'rgba(5,9,18,0.44)', pointerEvents: 'none' }} />
+
+        {/* Bottom fade */}
+        <div style={{
+          position: 'absolute', bottom: 0, left: 0, right: 0,
+          height: 180, background: 'linear-gradient(to top, var(--bg), transparent)',
+          pointerEvents: 'none',
+        }} />
+
+        {/* ── Content ── */}
+        <div style={{ position: 'relative', zIndex: 1, textAlign: 'center', maxWidth: 660, width: '100%' }}>
+
+          {/* Badge */}
+          <div className="a-fade" style={{
+            display: 'inline-flex', alignItems: 'center', gap: 7,
+            background: 'rgba(245,158,11,0.08)',
+            border: '1px solid rgba(245,158,11,0.24)',
+            borderRadius: 9999, padding: '5px 14px', marginBottom: 28,
+            fontSize: 11, fontWeight: 700, color: 'var(--gold)',
+            letterSpacing: '0.06em', textTransform: 'uppercase',
+          }}>
+            <span style={{
+              width: 6, height: 6, borderRadius: '50%',
+              background: 'var(--gold)', boxShadow: '0 0 5px var(--gold)',
+              flexShrink: 0, display: 'inline-block',
+            }} />
+            Bitcoin Lightning Network
+          </div>
+
+          {/* Headline */}
+          <h1 className="a-fade d1" style={{
+            fontSize: 'clamp(36px, 7.5vw, 76px)',
+            fontWeight: 800, letterSpacing: '-0.035em',
+            lineHeight: 1.05, color: 'var(--t1)',
+            margin: '0 0 20px',
+          }}>
+            Map every node.<br />
+            <span style={{ color: 'var(--gold)' }}>Explore the&nbsp;network.</span>
+          </h1>
+
+          {/* Subtext */}
+          <p className="a-fade d2" style={{
+            fontSize: 'clamp(15px, 2.2vw, 18px)', color: 'var(--t2)',
+            lineHeight: 1.72, margin: '0 auto 36px',
+            maxWidth: 500,
+          }}>
+            Interactive visualization of the Bitcoin Lightning Network.
+            Explore 500+ nodes, 1,300+ channels, and discover the topology
+            powering instant Bitcoin payments.
           </p>
-          <button onClick={() => navigate('/explorer')} style={{
-            background: 'linear-gradient(135deg, #f59e0b, #d97706)',
-            color: '#09090b', border: 'none', borderRadius: '12px',
-            padding: '18px 40px', fontSize: '18px', fontWeight: 800, cursor: 'pointer',
-            boxShadow: '0 0 40px rgba(245,158,11,0.25)',
-          }}>Launch Explorer →</button>
-          <p style={{ color: '#3f3f46', fontSize: '13px', marginTop: '20px' }}>
-            Free to use · Open source · No sign-up required
+
+          {/* CTAs */}
+          <div className="a-fade d3" style={{
+            display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap',
+          }}>
+            <button
+              className="btn btn-gold"
+              style={{ fontSize: 15, padding: '13px 28px' }}
+              onClick={() => nav('/explorer')}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
+              Launch Explorer
+            </button>
+            <button
+              className="btn btn-ghost"
+              style={{ fontSize: 15, padding: '13px 28px' }}
+              onClick={() => scrollTo(featuresRef)}
+            >
+              Learn more
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* ══ STATS BAR ═════════════════════════════════════════ */}
+      <section style={{
+        background: 'var(--s1)',
+        borderTop: '1px solid var(--b1)',
+        borderBottom: '1px solid var(--b1)',
+        padding: '44px clamp(16px, 5vw, 48px)',
+      }}>
+        <div style={{
+          maxWidth: 800, margin: '0 auto',
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+          gap: 32,
+        }}>
+          <Counter end={500}  suffix="+" label="Active Nodes" />
+          <Counter end={1310} suffix="+" label="Payment Channels" />
+          <Counter end={47}   suffix=" BTC" label="Network Capacity" />
+          <Counter end={4}    label="Node Tiers" />
+        </div>
+      </section>
+
+      {/* ══ FEATURES ══════════════════════════════════════════ */}
+      <section ref={featuresRef} style={{
+        padding: '96px clamp(16px, 5vw, 48px)',
+        maxWidth: 1100, margin: '0 auto',
+      }}>
+        {/* Section header */}
+        <div style={{ textAlign: 'center', marginBottom: 52 }}>
+          <p style={{
+            fontSize: 11, color: 'var(--gold)', fontWeight: 700,
+            letterSpacing: '0.12em', textTransform: 'uppercase', margin: '0 0 12px',
+          }}>
+            Capabilities
+          </p>
+          <h2 style={{
+            fontSize: 'clamp(26px, 4vw, 42px)', fontWeight: 800,
+            letterSpacing: '-0.028em', color: 'var(--t1)', margin: '0 0 14px',
+          }}>
+            Built for network analysis
+          </h2>
+          <p style={{
+            fontSize: 15, color: 'var(--t2)', maxWidth: 440,
+            margin: '0 auto', lineHeight: 1.72,
+          }}>
+            Everything you need to explore, understand, and analyze the
+            Lightning Network's topology.
+          </p>
+        </div>
+
+        {/* Cards grid — 3 cols desktop, 2 tablet, 1 mobile */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+          gap: 10,
+        }}>
+          <FeatureCard
+            delay={80}
+            icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>}
+            title="Force-Directed Graph"
+            desc="Physics simulation organizes nodes by connectivity. High-traffic hubs cluster naturally at the center, leaf nodes float at the edges."
+          />
+          <FeatureCard
+            delay={160}
+            icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>}
+            title="Instant Node Search"
+            desc="Search any node by name with live autocomplete. Press ⌘K anywhere in the explorer to jump to search instantly."
+          />
+          <FeatureCard
+            delay={240}
+            icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>}
+            title="Centrality Scoring"
+            desc="Every node is scored by degree centrality and classified as Major Hub, Connector, Relay Node, or Leaf Node automatically."
+          />
+          <FeatureCard
+            delay={320}
+            icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>}
+            title="Channel Inspection"
+            desc="Click any node to reveal its channels, BTC capacity, satoshi balance, and its direct connections to neighboring nodes."
+          />
+          <FeatureCard
+            delay={400}
+            icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>}
+            title="Hub Filtering"
+            desc="Toggle between all nodes and major hubs with 4+ channels. Reveal the backbone routing infrastructure of the network."
+          />
+          <FeatureCard
+            delay={480}
+            icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>}
+            title="Capacity Metrics"
+            desc="View total channel capacity in BTC and satoshis. Understand which nodes control the most liquidity in the network."
+          />
+        </div>
+      </section>
+
+      {/* ══ HOW IT WORKS ══════════════════════════════════════ */}
+      <section style={{
+        background: 'var(--s1)',
+        borderTop: '1px solid var(--b1)',
+        borderBottom: '1px solid var(--b1)',
+        padding: '96px clamp(16px, 5vw, 48px)',
+      }}>
+        <div style={{ maxWidth: 900, margin: '0 auto' }}>
+          {/* Header */}
+          <div style={{ textAlign: 'center', marginBottom: 56 }}>
+            <p style={{
+              fontSize: 11, color: 'var(--gold)', fontWeight: 700,
+              letterSpacing: '0.12em', textTransform: 'uppercase', margin: '0 0 12px',
+            }}>
+              How it works
+            </p>
+            <h2 style={{
+              fontSize: 'clamp(24px, 4vw, 38px)', fontWeight: 800,
+              letterSpacing: '-0.028em', color: 'var(--t1)', margin: 0,
+            }}>
+              Three steps to the network
+            </h2>
+          </div>
+
+          {/* Steps */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+          }}>
+            {[
+              {
+                n: '01',
+                title: 'Load the graph',
+                body: 'The explorer fetches real Lightning Network data and renders all nodes and channels as a live force-directed graph visualization.',
+              },
+              {
+                n: '02',
+                title: 'Explore freely',
+                body: 'Pan, zoom, and navigate the graph. Nodes are sized and colored by centrality score. Major hubs rise naturally to the center.',
+              },
+              {
+                n: '03',
+                title: 'Inspect any node',
+                body: "Click any node to reveal its full profile: alias, role, channel count, BTC capacity, and centrality score in the network.",
+              },
+            ].map((step, i) => (
+              <div key={i} className="step-item">
+                <div style={{
+                  fontSize: 11, fontWeight: 800, color: 'var(--t3)',
+                  letterSpacing: '0.12em', marginBottom: 16,
+                }}>
+                  {step.n}
+                </div>
+                <h3 style={{
+                  fontSize: 16, fontWeight: 700, color: 'var(--t1)',
+                  margin: '0 0 10px', letterSpacing: '-0.01em',
+                }}>
+                  {step.title}
+                </h3>
+                <p style={{ fontSize: 13, color: 'var(--t2)', margin: 0, lineHeight: 1.68 }}>
+                  {step.body}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ══ FINAL CTA ═════════════════════════════════════════ */}
+      <section style={{
+        padding: '120px clamp(16px, 5vw, 48px)',
+        textAlign: 'center',
+        position: 'relative', overflow: 'hidden',
+      }}>
+        {/* Ambient glow */}
+        <div style={{
+          position: 'absolute', inset: 0,
+          background: 'radial-gradient(ellipse 65% 55% at 50% 50%, rgba(245,158,11,0.06) 0%, transparent 70%)',
+          pointerEvents: 'none',
+        }} />
+
+        <div style={{ position: 'relative', zIndex: 1 }}>
+          <div className="a-float" style={{ display: 'inline-flex', marginBottom: 28 }}>
+            <LatticeMark size={50} />
+          </div>
+
+          <h2 style={{
+            fontSize: 'clamp(30px, 5.5vw, 54px)', fontWeight: 800,
+            letterSpacing: '-0.032em', color: 'var(--t1)', margin: '0 0 14px', lineHeight: 1.1,
+          }}>
+            Ready to explore?
+          </h2>
+
+          <p style={{
+            fontSize: 'clamp(14px, 2vw, 17px)', color: 'var(--t2)',
+            margin: '0 auto 32px', maxWidth: 380, lineHeight: 1.68,
+          }}>
+            Dive into the world's most connected payment network.
+            No account required.
+          </p>
+
+          <button
+            className="btn btn-gold"
+            style={{ fontSize: 15, padding: '14px 32px' }}
+            onClick={() => nav('/explorer')}
+          >
+            Launch Explorer
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" />
+            </svg>
+          </button>
+
+          <p style={{ fontSize: 12, color: 'var(--t3)', marginTop: 18 }}>
+            Free to use · No sign-up · Open data
           </p>
         </div>
       </section>
 
-      {/* FOOTER */}
+      {/* ══ FOOTER ════════════════════════════════════════════ */}
       <footer style={{
-        borderTop: '1px solid rgba(124,58,237,0.15)',
-        padding: '40px 48px',
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        background: 'rgba(124,58,237,0.03)',
+        borderTop: '1px solid var(--b1)',
+        background: 'var(--s1)',
+        padding: '24px clamp(16px, 5vw, 48px)',
+        display: 'flex', alignItems: 'center',
+        justifyContent: 'space-between', flexWrap: 'wrap', gap: 12,
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div style={{
-            width: '26px', height: '26px',
-            background: 'linear-gradient(135deg, #7c3aed, #f59e0b)',
-            borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px',
-          }}>⚡</div>
-          <span style={{ fontWeight: 700, fontSize: '15px' }}>Lattice</span>
-          <span style={{ color: '#3f3f46', fontSize: '13px', marginLeft: '8px' }}>The Lightning Network, made visible.</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <LatticeMark size={18} />
+          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--t1)' }}>Lattice</span>
+          <span style={{ fontSize: 13, color: 'var(--t3)' }}>
+            — Lightning Network Explorer
+          </span>
         </div>
-        <div style={{ color: '#3f3f46', fontSize: '13px' }}>
-          © 2025 Lattice · Open source project · Built on Bitcoin's Lightning Network
-        </div>
+        <span style={{ fontSize: 12, color: 'var(--t3)' }}>
+          Built for the Bitcoin Lightning Network
+        </span>
       </footer>
 
     </div>

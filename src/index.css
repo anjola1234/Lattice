@@ -1,1 +1,174 @@
 @import "tailwindcss";
+
+/* ─── Design Tokens ─────────────────────────────────────── */
+:root {
+  /* Backgrounds */
+  --bg:  #050912;
+  --s1:  #080D1E;
+  --s2:  #0C1228;
+  --s3:  #111930;
+
+  /* Borders */
+  --b1:  rgba(255, 255, 255, 0.05);
+  --b2:  rgba(255, 255, 255, 0.10);
+  --b3:  rgba(255, 255, 255, 0.18);
+
+  /* Accent — Lightning gold */
+  --gold:      #F59E0B;
+  --gold-glow: rgba(245, 158, 11, 0.22);
+  --gold-dim:  rgba(245, 158, 11, 0.07);
+
+  /* Text */
+  --t1: #EEF2FF;
+  --t2: #8899B8;
+  --t3: #445570;
+
+  /* Radius */
+  --r:   8px;
+  --rl:  14px;
+  --rxl: 20px;
+
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ─── Base Reset ─────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--t1);
+  overflow-x: hidden;
+}
+
+/* ─── Scrollbar ──────────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--s3); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: var(--b3); }
+
+/* ─── Keyframe Animations ────────────────────────────────── */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-right {
+  from { opacity: 0; transform: translateX(22px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes scale-up {
+  from { opacity: 0; transform: scale(0.94); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes overlay-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes spin-ring {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes float-y {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(-7px); }
+}
+
+/* ─── Animation Classes ──────────────────────────────────── */
+.a-fade    { animation: fade-in     0.55s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.a-slide   { animation: slide-right 0.38s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.a-scale   { animation: scale-up    0.42s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.a-overlay { animation: overlay-in  0.35s ease both; }
+.a-float   { animation: float-y     3.2s ease-in-out infinite; }
+
+/* Stagger delays */
+.d1 { animation-delay:  80ms; }
+.d2 { animation-delay: 160ms; }
+.d3 { animation-delay: 240ms; }
+.d4 { animation-delay: 320ms; }
+.d5 { animation-delay: 400ms; }
+.d6 { animation-delay: 480ms; }
+
+/* ─── Button Primitives ──────────────────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: 600;
+  text-decoration: none;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  white-space: nowrap;
+  user-select: none;
+  line-height: 1;
+}
+
+.btn:active { transform: scale(0.96) !important; }
+
+.btn-gold {
+  background: var(--gold);
+  color: #070400;
+  border-radius: var(--r);
+  padding: 11px 22px;
+  font-size: 14px;
+}
+
+.btn-gold:hover {
+  background: #FBBF24;
+  box-shadow: 0 6px 24px var(--gold-glow);
+  transform: translateY(-1px);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--t2);
+  border: 1px solid var(--b2);
+  border-radius: var(--r);
+  padding: 11px 22px;
+  font-size: 14px;
+}
+
+.btn-ghost:hover {
+  background: var(--s2);
+  color: var(--t1);
+  border-color: var(--b3);
+}
+
+/* ─── Responsive Utilities ───────────────────────────────── */
+
+/* Desktop legend in explorer header */
+.desktop-legend { display: none; }
+@media (min-width: 900px) {
+  .desktop-legend { display: flex; }
+}
+
+/* Hide text labels on very small screens */
+@media (max-width: 520px) {
+  .hide-xs { display: none !important; }
+}
+
+/* Step dividers: bottom border on mobile, right border on desktop */
+.step-item {
+  padding: clamp(20px, 3vw, 32px);
+  border-bottom: 1px solid var(--b1);
+}
+.step-item:last-child { border-bottom: none; }
+
+@media (min-width: 600px) {
+  .step-item { border-bottom: none; border-right: 1px solid var(--b1); }
+  .step-item:last-child { border-right: none; }
+}
+
+/* Nav links — show only on wider screens */
+.nav-links { display: none; }
+@media (min-width: 680px) {
+  .nav-links { display: flex; }
+}

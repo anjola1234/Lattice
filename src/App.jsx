@@ -1,506 +1,691 @@
-import './App.css'
-import { useState } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useLightningGraph } from './useLightningGraph'
 import GraphView from './GraphView'
 
-// ── Role colours (match Cytoscape node colours exactly) ──────────────────────
-const ROLE_COLOR = {
-  'Major Hub':  '#ffffff',
-  'Connector':  '#fef08a',
-  'Relay Node': '#f59e0b',
-  'Leaf':       '#44200a',
+/* ─── Role Config ────────────────────────────────────────── */
+// Role names come from useLightningGraph: 'Major Hub', 'Connector', 'Relay Node', 'Leaf Node'
+const ROLES = {
+  'Major Hub':  { color: '#FFFFFF', bg: 'rgba(255,255,255,0.07)', dot: '#FFFFFF',  glow: 'rgba(255,255,255,0.20)' },
+  'Connector':  { color: '#FEF08A', bg: 'rgba(254,240,138,0.09)', dot: '#FEF08A',  glow: 'rgba(254,240,138,0.18)' },
+  'Relay Node': { color: '#F59E0B', bg: 'rgba(245,158,11,0.09)',  dot: '#F59E0B',  glow: 'rgba(245,158,11,0.22)'  },
+  'Leaf Node':  { color: '#B07040', bg: 'rgba(176,112,64,0.09)',  dot: '#A06838',  glow: 'rgba(176,112,64,0.16)'  },
 }
-const ROLE_BG = {
-  'Major Hub':  'rgba(255,255,255,0.10)',
-  'Connector':  'rgba(254,240,138,0.12)',
-  'Relay Node': 'rgba(245,158,11,0.12)',
-  'Leaf':       'rgba(68,32,10,0.45)',
-}
+const getRole = (r) => ROLES[r] || ROLES['Leaf Node']
 
-// ── SVG logo mark ─────────────────────────────────────────────────────────────
-function LatticeMark({ size = 28 }) {
+/* ─── Lattice Logo Mark ──────────────────────────────────── */
+function LatticeMark({ size = 24 }) {
+  const cx = size / 2
+  const r  = size * 0.38
   return (
-    <svg width={size} height={size} viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
-      {/* Outer hexagon */}
-      <polygon
-        points="14,2 24.1,8 24.1,20 14,26 3.9,20 3.9,8"
-        stroke="#f59e0b"
-        strokeWidth="1.5"
-        fill="none"
-        strokeLinejoin="round"
-      />
-      {/* Inner node */}
-      <circle cx="14" cy="14" r="2.5" fill="#f59e0b" />
-      {/* Spokes to vertices */}
-      <line x1="14" y1="14" x2="14" y2="2"   stroke="#f59e0b" strokeWidth="1" strokeOpacity="0.5" />
-      <line x1="14" y1="14" x2="24.1" y2="8"  stroke="#f59e0b" strokeWidth="1" strokeOpacity="0.5" />
-      <line x1="14" y1="14" x2="24.1" y2="20" stroke="#f59e0b" strokeWidth="1" strokeOpacity="0.5" />
-      <line x1="14" y1="14" x2="14" y2="26"  stroke="#f59e0b" strokeWidth="1" strokeOpacity="0.5" />
-      <line x1="14" y1="14" x2="3.9" y2="20"  stroke="#f59e0b" strokeWidth="1" strokeOpacity="0.5" />
-      <line x1="14" y1="14" x2="3.9" y2="8"   stroke="#f59e0b" strokeWidth="1" strokeOpacity="0.5" />
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} fill="none" aria-hidden="true">
+      {Array.from({ length: 6 }, (_, i) => {
+        const a = (i * Math.PI * 2) / 6 - Math.PI / 2
+        return (
+          <line key={i} x1={cx} y1={cx}
+            x2={cx + r * Math.cos(a)} y2={cx + r * Math.sin(a)}
+            stroke="#F59E0B" strokeWidth="1.5" strokeLinecap="round" />
+        )
+      })}
+      <circle cx={cx} cy={cx} r={r} stroke="#F59E0B" strokeWidth="1.5" fill="none" opacity="0.22" />
+      <circle cx={cx} cy={cx} r="2.5" fill="#F59E0B" />
     </svg>
   )
 }
 
-// ── Loading splash ─────────────────────────────────────────────────────────────
-function LoadingSplash() {
+/* ─── Loading Screen ─────────────────────────────────────── */
+function LoadingScreen() {
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center"
-      style={{
-        background: '#030712',
-        backgroundImage: `
-          linear-gradient(rgba(245,158,11,0.04) 1px, transparent 1px),
-          linear-gradient(90deg, rgba(245,158,11,0.04) 1px, transparent 1px)
-        `,
-        backgroundSize: '48px 48px',
-      }}
-    >
-      {/* Ambient glow */}
-      <div
-        className="absolute w-96 h-96 rounded-full pointer-events-none"
-        style={{
-          background: 'radial-gradient(circle, rgba(245,158,11,0.08) 0%, transparent 70%)',
-          top: '50%',
-          left: '50%',
-          transform: 'translate(-50%, -50%)',
-        }}
-      />
-
-      <div className="relative flex flex-col items-center gap-6 text-center px-8">
-        {/* Logo */}
-        <div className="flex flex-col items-center gap-3">
-          <LatticeMark size={48} />
-          <div>
-            <h1 className="text-white text-4xl font-bold tracking-tight">Lattice</h1>
-            <p className="text-amber-400 text-sm font-medium mt-1 tracking-widest uppercase">
-              The Lightning Network, visualized.
-            </p>
-          </div>
+    <div style={{
+      position: 'fixed', inset: 0,
+      background: 'var(--bg)',
+      display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center',
+      gap: 20, zIndex: 200,
+    }}>
+      {/* Spinning ring */}
+      <div style={{ position: 'relative', width: 56, height: 56 }}>
+        <div style={{
+          position: 'absolute', inset: 0,
+          borderRadius: '50%',
+          border: '2px solid rgba(245,158,11,0.12)',
+          borderTopColor: 'var(--gold)',
+          animation: 'spin-ring 0.9s linear infinite',
+        }} />
+        <div style={{
+          position: 'absolute', inset: 14,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <LatticeMark size={24} />
         </div>
-
-        <p className="text-slate-500 text-sm max-w-xs leading-relaxed">
-          Mapping the topology of Bitcoin's Layer 2 payment network — nodes, channels, and routing hubs.
-        </p>
-
-        {/* Pulsing dot ring */}
-        <div className="relative w-12 h-12 flex items-center justify-center">
-          {[0, 1, 2, 3, 4, 5].map(i => (
-            <span
-              key={i}
-              className="absolute w-1.5 h-1.5 rounded-full bg-amber-400"
-              style={{
-                top:  `${50 - 42 * Math.cos((i / 6) * 2 * Math.PI)}%`,
-                left: `${50 + 42 * Math.sin((i / 6) * 2 * Math.PI)}%`,
-                animation: `pulse 1.2s ease-in-out ${i * 0.2}s infinite`,
-                opacity: 0.3,
-              }}
-            />
-          ))}
-          <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" style={{ opacity: 0.8 }} />
-        </div>
-
-        <p className="text-slate-600 text-xs tracking-wide">Loading graph data…</p>
       </div>
 
-      <style>{`
-        @keyframes pulse {
-          0%, 100% { opacity: 0.2; transform: scale(0.8); }
-          50%       { opacity: 1;   transform: scale(1.2); }
-        }
-      `}</style>
+      <div style={{ textAlign: 'center' }}>
+        <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--t1)', margin: '0 0 4px' }}>
+          Loading network
+        </p>
+        <p style={{ fontSize: 12, color: 'var(--t3)', margin: 0 }}>
+          Fetching Lightning graph data
+        </p>
+      </div>
     </div>
   )
 }
 
-// ── Welcome overlay ────────────────────────────────────────────────────────────
+/* ─── Welcome Overlay ────────────────────────────────────── */
 function WelcomeOverlay({ graphData, onDismiss }) {
-  const totalCapacityBTC = graphData
-    ? (graphData.nodes.reduce((sum, n) => sum + n.capacity, 0) / 1e8).toFixed(1)
+  const totalBtc = graphData
+    ? (graphData.nodes.reduce((s, n) => s + (n.capacity || 0), 0) / 1e8).toFixed(1)
     : '0'
 
+  const stats = [
+    { v: graphData?.nodes.length.toLocaleString() ?? '—', l: 'Nodes' },
+    { v: graphData?.edges.length.toLocaleString() ?? '—', l: 'Channels' },
+    { v: totalBtc,                                         l: 'BTC Capacity' },
+  ]
+
   return (
     <div
-      className="fixed inset-0 z-40 flex items-center justify-center"
-      style={{ background: 'rgba(3,7,18,0.75)', backdropFilter: 'blur(6px)' }}
+      className="a-overlay"
+      style={{
+        position: 'fixed', inset: 0,
+        background: 'rgba(5,9,18,0.88)',
+        backdropFilter: 'blur(22px)',
+        zIndex: 100,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: 16,
+      }}
     >
       <div
-        className="relative w-full max-w-md mx-4 rounded-2xl border border-gray-800 shadow-2xl overflow-hidden"
-        style={{ background: 'rgba(15,23,42,0.98)' }}
+        className="a-scale"
+        style={{
+          background: 'var(--s1)',
+          border: '1px solid var(--b2)',
+          borderRadius: 20,
+          padding: 'clamp(28px, 6vw, 44px) clamp(20px, 5vw, 36px)',
+          maxWidth: 400, width: '100%',
+          textAlign: 'center',
+          boxShadow: '0 40px 100px rgba(0,0,0,0.75), 0 0 0 1px rgba(245,158,11,0.04)',
+          position: 'relative', overflow: 'hidden',
+        }}
       >
-        {/* Amber top accent */}
-        <div className="h-px w-full" style={{ background: 'linear-gradient(90deg, transparent, #f59e0b, transparent)' }} />
+        {/* Top accent line */}
+        <div style={{
+          position: 'absolute', top: 0, left: 0, right: 0, height: 1,
+          background: 'linear-gradient(90deg, transparent, rgba(245,158,11,0.5), transparent)',
+        }} />
 
-        <div className="p-8 flex flex-col items-center text-center gap-5">
-          {/* Wordmark */}
-          <div className="flex flex-col items-center gap-2">
-            <LatticeMark size={36} />
-            <h2 className="text-white text-2xl font-bold tracking-tight">Lattice</h2>
-            <p className="text-amber-400 text-xs font-medium tracking-widest uppercase">
-              The Lightning Network, visualized.
-            </p>
-          </div>
-
-          <p className="text-slate-400 text-sm leading-relaxed max-w-sm">
-            Explore the topology of Bitcoin's Lightning Network. Click any node to inspect its channels,
-            capacity, and routing role. Search by node name to highlight it and its peers.
-          </p>
-
-          {/* Stats row */}
-          <div className="flex gap-3 w-full">
-            {[
-              { label: 'Nodes',    value: graphData?.nodes.length.toLocaleString() ?? '—' },
-              { label: 'Channels', value: graphData?.edges.length.toLocaleString() ?? '—' },
-              { label: 'Total BTC',value: `${totalCapacityBTC}` },
-            ].map(({ label, value }) => (
-              <div key={label} className="flex-1 rounded-xl border border-gray-800 bg-gray-950 py-3 px-2">
-                <p className="text-white font-bold text-lg leading-none">{value}</p>
-                <p className="text-slate-500 text-xs mt-1">{label}</p>
-              </div>
-            ))}
-          </div>
-
-          <button
-            onClick={onDismiss}
-            className="w-full py-2.5 rounded-xl font-semibold text-sm text-gray-950 transition-all duration-150 hover:brightness-110 active:scale-95"
-            style={{
-              background: 'linear-gradient(135deg, #f59e0b, #fef08a)',
-              boxShadow: '0 0 24px rgba(245,158,11,0.35)',
-            }}
-          >
-            Explore the Network →
-          </button>
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 18 }}>
+          <LatticeMark size={44} />
         </div>
 
-        <div className="h-px w-full" style={{ background: 'linear-gradient(90deg, transparent, rgba(245,158,11,0.2), transparent)' }} />
+        <h2 style={{
+          fontSize: 'clamp(20px, 4vw, 24px)', fontWeight: 800,
+          color: 'var(--t1)', margin: '0 0 7px', letterSpacing: '-0.025em',
+        }}>
+          Lattice Explorer
+        </h2>
+        <p style={{ fontSize: 13, color: 'var(--t2)', margin: '0 0 28px', lineHeight: 1.65 }}>
+          Interactive visualization of the Bitcoin Lightning Network topology.
+        </p>
+
+        {/* Stats row */}
+        <div style={{
+          display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)',
+          borderRadius: 11, overflow: 'hidden',
+          border: '1px solid var(--b1)',
+          marginBottom: 22,
+        }}>
+          {stats.map((s, i) => (
+            <div key={s.l} style={{
+              padding: '14px 6px', background: 'var(--s2)', textAlign: 'center',
+              borderRight: i < 2 ? '1px solid var(--b1)' : 'none',
+            }}>
+              <div style={{
+                fontSize: 'clamp(16px, 4vw, 20px)', fontWeight: 800,
+                color: 'var(--gold)', letterSpacing: '-0.02em',
+                fontVariantNumeric: 'tabular-nums',
+              }}>
+                {s.v}
+              </div>
+              <div style={{
+                fontSize: 9, color: 'var(--t3)', marginTop: 3,
+                textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600,
+              }}>
+                {s.l}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <button
+          className="btn btn-gold"
+          style={{ width: '100%', justifyContent: 'center', fontSize: 14, padding: '12px 20px' }}
+          onClick={onDismiss}
+        >
+          Start Exploring
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" />
+          </svg>
+        </button>
       </div>
     </div>
   )
 }
 
-// ── Node info panel ────────────────────────────────────────────────────────────
-function NodeInfoPanel({ node, onClose }) {
-  const btc       = (node.capacity / 1e8).toFixed(4)
-  const barWidth  = `${Math.min(node.centrality * 500, 100)}%`
-  const roleColor = ROLE_COLOR[node.role] ?? '#f59e0b'
-  const roleBg    = ROLE_BG[node.role]    ?? 'rgba(245,158,11,0.12)'
+/* ─── Search Bar ─────────────────────────────────────────── */
+function SearchBar({ nodes, onSelect }) {
+  const [q,    setQ]    = useState('')
+  const [open, setOpen] = useState(false)
+  const [idx,  setIdx]  = useState(-1)
+  const inputRef = useRef(null)
+  const wrapRef  = useRef(null)
+
+  const results = q.trim().length > 0
+    ? nodes
+        .filter(n => n.alias?.toLowerCase().includes(q.toLowerCase()))
+        .slice(0, 6)
+    : []
+
+  const commit = useCallback((node) => {
+    setQ(''); setOpen(false); setIdx(-1)
+    onSelect(node)
+  }, [onSelect])
+
+  // ⌘K / Ctrl+K global shortcut
+  useEffect(() => {
+    const fn = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault()
+        inputRef.current?.focus()
+        inputRef.current?.select()
+      }
+    }
+    window.addEventListener('keydown', fn)
+    return () => window.removeEventListener('keydown', fn)
+  }, [])
+
+  // Close on outside click
+  useEffect(() => {
+    const fn = (e) => {
+      if (!wrapRef.current?.contains(e.target)) setOpen(false)
+    }
+    document.addEventListener('mousedown', fn)
+    return () => document.removeEventListener('mousedown', fn)
+  }, [])
+
+  return (
+    <div ref={wrapRef} style={{
+      position: 'relative', flexShrink: 0,
+      width: 'clamp(160px, 22vw, 272px)',
+    }}>
+      {/* Input */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8,
+        background: 'var(--s2)',
+        border: `1px solid ${open ? 'rgba(245,158,11,0.45)' : 'var(--b2)'}`,
+        borderRadius: 'var(--r)',
+        padding: '7px 10px',
+        transition: 'border-color 0.15s, box-shadow 0.15s',
+        boxShadow: open ? '0 0 0 3px rgba(245,158,11,0.07)' : 'none',
+      }}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+          stroke="var(--t3)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+        </svg>
+
+        <input
+          ref={inputRef}
+          value={q}
+          onChange={(e) => { setQ(e.target.value); setOpen(true); setIdx(-1) }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowDown') { e.preventDefault(); setIdx(i => Math.min(i + 1, results.length - 1)) }
+            if (e.key === 'ArrowUp')   { e.preventDefault(); setIdx(i => Math.max(i - 1, -1)) }
+            if (e.key === 'Enter' && idx >= 0) commit(results[idx])
+            if (e.key === 'Escape')    { setOpen(false); inputRef.current?.blur() }
+          }}
+          placeholder="Search nodes…"
+          aria-label="Search Lightning Network nodes"
+          style={{
+            flex: 1, background: 'none', border: 'none', outline: 'none',
+            fontSize: 12, color: 'var(--t1)', padding: 0, minWidth: 0,
+          }}
+        />
+
+        <kbd style={{
+          fontSize: 9, color: 'var(--t3)', background: 'var(--s3)',
+          padding: '2px 5px', borderRadius: 4, fontFamily: 'inherit',
+          border: '1px solid var(--b2)', flexShrink: 0, letterSpacing: '0.04em',
+        }}>
+          ⌘K
+        </kbd>
+      </div>
+
+      {/* Dropdown */}
+      {open && results.length > 0 && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0,
+          background: 'var(--s1)', border: '1px solid var(--b2)',
+          borderRadius: 11, boxShadow: '0 24px 64px rgba(0,0,0,0.75)',
+          overflow: 'hidden', zIndex: 50,
+        }}>
+          {results.map((node, i) => {
+            const rc = getRole(node.role)
+            return (
+              <div
+                key={node.key}
+                onMouseDown={() => commit(node)}
+                onMouseEnter={() => setIdx(i)}
+                style={{
+                  display: 'flex', alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '9px 12px',
+                  background: idx === i ? 'var(--s2)' : 'transparent',
+                  cursor: 'pointer',
+                  transition: 'background 0.1s',
+                  borderBottom: i < results.length - 1 ? '1px solid var(--b1)' : 'none',
+                }}
+              >
+                {/* Left: dot + name */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
+                  <div style={{
+                    width: 6, height: 6, borderRadius: '50%',
+                    background: rc.dot, flexShrink: 0,
+                  }} />
+                  <span style={{
+                    fontSize: 12, color: 'var(--t1)', fontWeight: 500,
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>
+                    {node.alias}
+                  </span>
+                </div>
+
+                {/* Right: channels + role badge */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, marginLeft: 8 }}>
+                  <span style={{ fontSize: 10, color: 'var(--t3)' }}>{node.channels}ch</span>
+                  <span style={{
+                    fontSize: 9, fontWeight: 700, color: rc.color,
+                    background: rc.bg, borderRadius: 4, padding: '2px 6px',
+                    letterSpacing: '0.03em',
+                  }}>
+                    {node.role}
+                  </span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ─── Node Info Panel ────────────────────────────────────── */
+function NodePanel({ node, onClose }) {
+  if (!node) return null
+
+  const rc          = getRole(node.role)
+  const btc         = node.capacity ? (node.capacity / 1e8).toFixed(4) : '0.0000'
+  const centralPct  = ((node.centrality || 0) * 100).toFixed(2)
+  const barWidth    = `${Math.min((node.centrality || 0) * 500, 100)}%`
 
   return (
     <div
-      className="absolute top-4 right-4 z-30 w-72 rounded-2xl overflow-hidden shadow-2xl"
+      className="a-slide"
       style={{
-        background: 'rgba(15,23,42,0.97)',
-        border: '1px solid #1e293b',
-        backdropFilter: 'blur(12px)',
-        boxShadow: '0 0 0 1px rgba(245,158,11,0.08), 0 24px 48px rgba(0,0,0,0.6)',
+        position: 'absolute', top: 12, right: 12,
+        width: 'clamp(230px, 26vw, 296px)',
+        background: 'rgba(8,13,30,0.95)',
+        backdropFilter: 'blur(30px)',
+        border: '1px solid var(--b2)',
+        borderRadius: 17,
+        boxShadow: '0 28px 80px rgba(0,0,0,0.65), 0 0 0 1px rgba(245,158,11,0.03)',
+        overflow: 'hidden',
+        zIndex: 30,
       }}
     >
-      {/* Amber top rule */}
-      <div className="h-px w-full" style={{ background: 'linear-gradient(90deg, transparent, #f59e0b 40%, transparent)' }} />
+      {/* Accent line — matches role color */}
+      <div style={{
+        height: 1,
+        background: `linear-gradient(90deg, transparent, ${rc.dot}55, transparent)`,
+      }} />
 
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800/60">
-        <div className="flex items-center gap-2">
-          <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-          <span className="text-slate-400 text-xs font-medium tracking-wide uppercase">Node Details</span>
+      <div style={{
+        padding: '16px 16px 14px',
+        borderBottom: '1px solid var(--b1)',
+        display: 'flex', alignItems: 'flex-start',
+        justifyContent: 'space-between', gap: 10,
+      }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {/* Role badge */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 7 }}>
+            <div style={{
+              width: 7, height: 7, borderRadius: '50%',
+              background: rc.dot, boxShadow: `0 0 5px ${rc.dot}`,
+              flexShrink: 0,
+            }} />
+            <span style={{
+              fontSize: 9, fontWeight: 800, color: rc.color,
+              background: rc.bg, borderRadius: 4, padding: '2px 7px',
+              letterSpacing: '0.05em', textTransform: 'uppercase',
+            }}>
+              {node.role}
+            </span>
+          </div>
+
+          {/* Alias */}
+          <h2 style={{
+            fontSize: 15, fontWeight: 700, color: 'var(--t1)',
+            margin: 0, letterSpacing: '-0.01em',
+            wordBreak: 'break-word', lineHeight: 1.28,
+          }}>
+            {node.alias || 'Unknown Node'}
+          </h2>
         </div>
+
+        {/* Close button */}
         <button
           onClick={onClose}
-          className="w-6 h-6 flex items-center justify-center rounded-lg text-slate-500 hover:text-white hover:bg-gray-800 transition-colors text-base leading-none"
+          aria-label="Close node panel"
+          style={{
+            width: 26, height: 26, borderRadius: 6,
+            background: 'var(--s3)', border: '1px solid var(--b1)',
+            color: 'var(--t2)', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0, transition: 'all 0.15s',
+          }}
+          onMouseEnter={e => {
+            e.currentTarget.style.color    = 'var(--t1)'
+            e.currentTarget.style.background = 'var(--b2)'
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.color    = 'var(--t2)'
+            e.currentTarget.style.background = 'var(--s3)'
+          }}
         >
-          ×
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6"  y1="6" x2="18" y2="18" />
+          </svg>
         </button>
       </div>
 
-      <div className="px-4 pt-4 pb-2">
-        {/* Alias */}
-        <p className="text-white font-bold text-base leading-snug break-words">{node.alias}</p>
+      {/* Body */}
+      <div style={{ padding: '14px 16px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
 
-        {/* Role badge */}
-        <span
-          className="inline-flex items-center gap-1.5 mt-2 text-xs font-semibold px-2.5 py-1 rounded-full"
-          style={{ background: roleBg, color: roleColor, border: `1px solid ${roleColor}22` }}
-        >
-          <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: roleColor }} />
-          {node.role}
-        </span>
-      </div>
+        {/* Centrality bar */}
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 7 }}>
+            <span style={{
+              fontSize: 9, color: 'var(--t3)', textTransform: 'uppercase',
+              letterSpacing: '0.1em', fontWeight: 700,
+            }}>
+              Network Centrality
+            </span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: rc.color }}>
+              {centralPct}%
+            </span>
+          </div>
+          <div style={{ height: 3, background: 'var(--s3)', borderRadius: 2, overflow: 'hidden' }}>
+            <div style={{
+              height: '100%', borderRadius: 2, width: barWidth,
+              background: `linear-gradient(to right, ${rc.dot}88, ${rc.dot})`,
+              transition: 'width 0.75s cubic-bezier(0.16, 1, 0.3, 1)',
+            }} />
+          </div>
+        </div>
 
-      {/* Centrality */}
-      <div className="px-4 pt-2 pb-3">
-        <div className="flex justify-between text-xs mb-1.5">
-          <span className="text-slate-500">Network Centrality</span>
-          <span className="text-white font-medium tabular-nums">{(node.centrality * 100).toFixed(2)}%</span>
-        </div>
-        <div className="w-full h-1.5 bg-gray-900 rounded-full overflow-hidden">
-          <div
-            className="h-full rounded-full"
-            style={{
-              width: barWidth,
-              background: 'linear-gradient(90deg, #b45309, #f59e0b, #fef08a)',
-              transition: 'width 0.6s cubic-bezier(.4,0,.2,1)',
-            }}
-          />
-        </div>
-      </div>
-
-      {/* Stats grid */}
-      <div className="px-4 pb-4 grid grid-cols-2 gap-2">
-        <div className="rounded-xl bg-gray-950 border border-gray-800/60 p-3">
-          <p className="text-slate-500 text-xs mb-1">Channels</p>
-          <p className="text-white font-bold text-xl tabular-nums">{node.channels}</p>
-        </div>
-        <div className="rounded-xl bg-gray-950 border border-gray-800/60 p-3">
-          <p className="text-slate-500 text-xs mb-1">Capacity</p>
-          <p className="text-white font-bold text-xl tabular-nums">{btc}</p>
-          <p className="text-slate-600 text-xs mt-0.5">BTC</p>
-        </div>
-        <div className="col-span-2 rounded-xl bg-gray-950 border border-gray-800/60 p-3">
-          <p className="text-slate-500 text-xs mb-1">Satoshis</p>
-          <p className="text-slate-300 font-semibold text-sm tabular-nums">
-            {node.capacity.toLocaleString()} sats
-          </p>
+        {/* Stat cards */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7 }}>
+          {[
+            { label: 'Channels',     value: node.channels ?? '—',      span: false },
+            { label: 'Capacity BTC', value: btc,                       span: false },
+            { label: 'Satoshis',     value: node.capacity?.toLocaleString() ?? '—', span: true },
+          ].map(({ label, value, span }) => (
+            <div
+              key={label}
+              style={{
+                background: 'var(--s2)',
+                borderRadius: 8,
+                padding: '10px 12px',
+                border: '1px solid var(--b1)',
+                gridColumn: span ? '1 / -1' : undefined,
+              }}
+            >
+              <div style={{
+                fontSize: 9, color: 'var(--t3)', textTransform: 'uppercase',
+                letterSpacing: '0.1em', marginBottom: 4, fontWeight: 700,
+              }}>
+                {label}
+              </div>
+              <div style={{
+                fontSize: span ? 12 : 17, fontWeight: 700,
+                color: 'var(--t1)', fontVariantNumeric: 'tabular-nums',
+                lineHeight: 1.2,
+              }}>
+                {value}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </div>
   )
 }
 
-// ── Main app ──────────────────────────────────────────────────────────────────
-function App() {
+/* ─── Legend ─────────────────────────────────────────────── */
+function Legend({ compact = false }) {
+  return (
+    <div style={{ display: 'flex', gap: compact ? 10 : 14, alignItems: 'center', flexWrap: 'wrap' }}>
+      {Object.entries(ROLES).map(([role, cfg]) => (
+        <div key={role} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          <div style={{
+            width: 6, height: 6, borderRadius: '50%',
+            background: cfg.dot,
+            boxShadow: `0 0 4px ${cfg.dot}55`,
+            flexShrink: 0,
+          }} />
+          <span style={{
+            fontSize: compact ? 10 : 11,
+            color: 'var(--t3)', whiteSpace: 'nowrap',
+          }}>
+            {role}
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/* ─── App ────────────────────────────────────────────────── */
+export default function App() {
+  const nav = useNavigate()
   const { graphData, loading, error } = useLightningGraph()
-  const [selectedNode,  setSelectedNode]  = useState(null)
-  const [searchTerm,    setSearchTerm]    = useState('')
-  const [searchResults, setSearchResults] = useState([])
-  const [showAllNodes,  setShowAllNodes]  = useState(false)
-  const [showWelcome,   setShowWelcome]   = useState(true)   // UI-only toggle
 
-  // ── Filter logic (unchanged) ──────────────────────────────────────────────
-  function getFilteredData() {
+  const [selected,    setSelected]    = useState(null)
+  const [showWelcome, setShowWelcome] = useState(true)
+  const [showAll,     setShowAll]     = useState(false)
+
+  // Build filtered dataset
+  const filtered = (() => {
     if (!graphData) return null
-    if (showAllNodes) return graphData
-    const visibleNodes = graphData.nodes.filter(n => n.channels >= 4)
-    const visibleKeys  = new Set(visibleNodes.map(n => n.key))
-    const visibleEdges = graphData.edges.filter(e =>
-      visibleKeys.has(e.source) && visibleKeys.has(e.target)
-    )
-    return { nodes: visibleNodes, edges: visibleEdges }
-  }
+    if (showAll)   return graphData
 
-  const filteredData = getFilteredData()
+    const nodes = graphData.nodes.filter(n => (n.channels || 0) >= 4)
+    const keySet = new Set(nodes.map(n => n.key))
+    const edges  = graphData.edges.filter(e => keySet.has(e.source) && keySet.has(e.target))
+    return { nodes, edges }
+  })()
 
-  function handleSearch(term) {
-    setSearchTerm(term)
-    if (!term.trim() || !graphData) { setSearchResults([]); return }
-    const lower   = term.toLowerCase()
-    const matches = graphData.nodes.filter(n => n.alias.toLowerCase().includes(lower))
-    setSearchResults(matches.slice(0, 6))
-  }
+  const handleSelect = useCallback((node) => {
+    setSelected(node)
+    if (showWelcome) setShowWelcome(false)
+  }, [showWelcome])
 
-  function handleSelectNode(node) {
-    setSelectedNode(node)
-    setSearchTerm(node.alias)
-    setSearchResults([])
-  }
+  const handleDeselect = useCallback(() => setSelected(null), [])
 
-  function handleClear() {
-    setSelectedNode(null)
-    setSearchTerm('')
-    setSearchResults([])
-  }
+  const toggleFilter = useCallback(() => {
+    setShowAll(v => !v)
+    setSelected(null)
+  }, [])
 
-  // ── Loading / error states ────────────────────────────────────────────────
-  if (loading) return <LoadingSplash />
+  // ── Loading ──────────────────────────────────────────────
+  if (loading) return <LoadingScreen />
 
+  // ── Error ────────────────────────────────────────────────
   if (error) return (
-    <div
-      className="fixed inset-0 flex items-center justify-center"
-      style={{ background: '#030712' }}
-    >
-      <div className="text-center space-y-2">
-        <p className="text-red-400 font-bold text-lg">Failed to load graph data</p>
-        <p className="text-slate-500 text-sm">{error}</p>
+    <div style={{
+      minHeight: '100vh', display: 'flex',
+      alignItems: 'center', justifyContent: 'center',
+      background: 'var(--bg)',
+    }}>
+      <div style={{ textAlign: 'center', padding: 24 }}>
+        <p style={{ color: '#EF4444', fontWeight: 700, fontSize: 16, margin: '0 0 6px' }}>
+          Failed to load graph data
+        </p>
+        <p style={{ color: 'var(--t3)', fontSize: 13, margin: 0 }}>{error}</p>
       </div>
     </div>
   )
 
-  // ── Main render ───────────────────────────────────────────────────────────
-  return (
-    <div className="h-screen flex flex-col overflow-hidden" style={{ background: '#030712' }}>
+  const nodeCount    = (filtered?.nodes.length ?? 0).toLocaleString()
+  const channelCount = (filtered?.edges.length  ?? 0).toLocaleString()
 
-      {/* ── Welcome overlay ── */}
+  // ── Main Render ──────────────────────────────────────────
+  return (
+    <div style={{
+      position: 'fixed', inset: 0,
+      display: 'flex', flexDirection: 'column',
+      background: 'var(--bg)', overflow: 'hidden',
+    }}>
+
+      {/* ══ HEADER ════════════════════════════════════════════ */}
+      <header style={{
+        height: 54, flexShrink: 0,
+        display: 'flex', alignItems: 'center', gap: 10,
+        padding: '0 12px',
+        background: 'rgba(8,13,30,0.92)',
+        backdropFilter: 'blur(24px)',
+        borderBottom: '1px solid var(--b1)',
+        zIndex: 20,
+      }}>
+        {/* Logo — click to go home */}
+        <button
+          onClick={() => nav('/')}
+          title="Back to home"
+          aria-label="Lattice home"
+          style={{
+            display: 'flex', alignItems: 'center', gap: 7,
+            background: 'none', border: 'none', cursor: 'pointer',
+            padding: '4px 8px', borderRadius: 7,
+            transition: 'background 0.15s', flexShrink: 0,
+          }}
+          onMouseEnter={e => e.currentTarget.style.background = 'var(--s2)'}
+          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+        >
+          <LatticeMark size={20} />
+          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--t1)', letterSpacing: '-0.02em' }}>
+            Lattice
+          </span>
+        </button>
+
+        {/* Divider */}
+        <div style={{ width: 1, height: 18, background: 'var(--b2)', flexShrink: 0 }} />
+
+        {/* Search */}
+        <SearchBar nodes={filtered?.nodes ?? []} onSelect={handleSelect} />
+
+        {/* Spacer */}
+        <div style={{ flex: 1 }} />
+
+        {/* Filter toggle */}
+        <button
+          onClick={toggleFilter}
+          title={showAll ? 'Show hubs only (≥4 channels)' : 'Show all nodes'}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 5,
+            padding: '5px 10px',
+            background: showAll ? 'rgba(245,158,11,0.1)' : 'var(--s2)',
+            border: `1px solid ${showAll ? 'rgba(245,158,11,0.38)' : 'var(--b2)'}`,
+            borderRadius: 7,
+            fontSize: 11, fontWeight: 700,
+            color: showAll ? 'var(--gold)' : 'var(--t2)',
+            cursor: 'pointer', transition: 'all 0.15s',
+            whiteSpace: 'nowrap', flexShrink: 0,
+          }}
+        >
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="3" y1="6"  x2="21" y2="6"  />
+            <line x1="8" y1="12" x2="16" y2="12" />
+            <line x1="11" y1="18" x2="13" y2="18" />
+          </svg>
+          <span className="hide-xs">{showAll ? 'All nodes' : 'Hubs only'}</span>
+        </button>
+
+        {/* Stats pills */}
+        <div style={{ display: 'flex', gap: 5 }}>
+          <div style={{
+            padding: '4px 9px',
+            background: 'var(--s2)', border: '1px solid var(--b1)',
+            borderRadius: 6, fontSize: 11, color: 'var(--t2)',
+            fontVariantNumeric: 'tabular-nums', flexShrink: 0,
+          }}>
+            <span style={{ fontWeight: 700, color: 'var(--t1)' }}>{nodeCount}</span>
+            <span className="hide-xs"> nodes</span>
+          </div>
+          <div style={{
+            padding: '4px 9px',
+            background: 'var(--s2)', border: '1px solid var(--b1)',
+            borderRadius: 6, fontSize: 11, color: 'var(--t2)',
+            fontVariantNumeric: 'tabular-nums', flexShrink: 0,
+          }}>
+            <span style={{ fontWeight: 700, color: 'var(--t1)' }}>{channelCount}</span>
+            <span className="hide-xs"> ch</span>
+          </div>
+        </div>
+
+        {/* Legend — desktop only */}
+        <div className="desktop-legend" style={{ marginLeft: 4 }}>
+          <Legend />
+        </div>
+      </header>
+
+      {/* ══ GRAPH CANVAS ══════════════════════════════════════ */}
+      <main style={{ flex: 1, position: 'relative', overflow: 'hidden', minHeight: 0 }}>
+        <GraphView
+          graphData={filtered}
+          selectedNode={selected}
+          onNodeClick={handleSelect}
+        />
+
+        {/* Node info panel */}
+        {selected && (
+          <NodePanel node={selected} onClose={handleDeselect} />
+        )}
+
+        {/* Mobile legend — bottom center */}
+        <div style={{
+          position: 'absolute', bottom: 12, left: '50%',
+          transform: 'translateX(-50%)',
+          background: 'rgba(8,13,30,0.88)',
+          backdropFilter: 'blur(16px)',
+          border: '1px solid var(--b1)',
+          borderRadius: 9, padding: '7px 14px',
+          pointerEvents: 'none',
+        }}>
+          <Legend compact />
+        </div>
+      </main>
+
+      {/* ══ WELCOME OVERLAY ═══════════════════════════════════ */}
       {showWelcome && (
         <WelcomeOverlay graphData={graphData} onDismiss={() => setShowWelcome(false)} />
       )}
-
-      {/* ══ HEADER ══════════════════════════════════════════════════════════ */}
-      <header
-        className="shrink-0 flex items-center gap-4 px-5 border-b border-gray-800/80 overflow-visible"
-        style={{
-          height: '60px',
-          background: 'rgba(3,7,18,0.98)',
-          backdropFilter: 'blur(8px)',
-          boxShadow: '0 1px 0 0 rgba(245,158,11,0.18)',
-          zIndex: 20,
-        }}
-      >
-        {/* ── Logo ── */}
-        <div className="shrink-0 flex items-center gap-2.5">
-          <LatticeMark size={26} />
-          <div className="leading-none">
-            <span className="text-white font-bold text-base tracking-tight">Lattice</span>
-            <p className="text-amber-500/60 text-[10px] mt-0.5 tracking-wide">
-              The Lightning Network, visualized.
-            </p>
-          </div>
-        </div>
-
-        <div className="w-px h-7 bg-gray-800 shrink-0 mx-1" />
-
-        {/* ── Search ── */}
-        <div className="relative w-60 shrink-0">
-          <svg
-            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none"
-            width="13" height="13" viewBox="0 0 20 20" fill="none"
-          >
-            <circle cx="9" cy="9" r="6.5" stroke="currentColor" strokeWidth="1.8"/>
-            <path d="M14 14l3.5 3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
-          </svg>
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={e => handleSearch(e.target.value)}
-            placeholder="Search nodes…"
-            className="w-full bg-gray-900/80 text-white text-sm rounded-xl pl-8 pr-8 py-1.5 border border-gray-800 focus:outline-none focus:border-amber-500/60 placeholder-slate-600 transition-colors"
-          />
-          {searchTerm && (
-            <button
-              onClick={handleClear}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white text-lg leading-none transition-colors"
-            >×</button>
-          )}
-          {/* Search dropdown */}
-          {searchResults.length > 0 && (
-            <div
-              className="absolute top-full left-0 right-0 mt-1.5 rounded-xl border border-gray-800 overflow-hidden shadow-2xl"
-              style={{ background: 'rgba(15,23,42,0.99)', backdropFilter: 'blur(8px)', zIndex: 9999 }}
-            >
-              {searchResults.map(node => (
-                <button
-                  key={node.key}
-                  onClick={() => handleSelectNode(node)}
-                  className="w-full text-left px-3 py-2 text-sm hover:bg-gray-800/70 border-b border-gray-800/60 last:border-0 transition-colors flex items-center justify-between gap-2"
-                >
-                  <span className="text-white font-medium truncate">{node.alias}</span>
-                  <span
-                    className="text-xs font-medium px-1.5 py-0.5 rounded-md shrink-0"
-                    style={{ color: ROLE_COLOR[node.role], background: ROLE_BG[node.role] }}
-                  >
-                    {node.role}
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* ── Live stats ── */}
-        <div className="flex items-center gap-4 text-xs ml-1">
-          <div className="flex items-center gap-1.5 text-slate-400">
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
-            <span>
-              <span className="text-white font-semibold tabular-nums">
-                {filteredData ? filteredData.nodes.length.toLocaleString() : 0}
-              </span>
-              {!showAllNodes && graphData && (
-                <span className="text-slate-600">/{graphData.nodes.length}</span>
-              )}
-              <span className="text-slate-500 ml-1">nodes</span>
-            </span>
-          </div>
-          <div className="flex items-center gap-1.5 text-slate-400">
-            <span className="w-1.5 h-1.5 rounded-full bg-sky-400 shrink-0" />
-            <span>
-              <span className="text-white font-semibold tabular-nums">
-                {filteredData ? filteredData.edges.length.toLocaleString() : 0}
-              </span>
-              <span className="text-slate-500 ml-1">channels</span>
-            </span>
-          </div>
-        </div>
-
-        {/* ── Spacer ── */}
-        <div className="flex-1" />
-
-        {/* ── Legend ── */}
-        <div className="hidden lg:flex items-center gap-4 text-xs text-slate-500 shrink-0">
-          {Object.entries(ROLE_COLOR).map(([role, color]) => (
-            <span key={role} className="flex items-center gap-1.5 whitespace-nowrap">
-              <span
-                className="w-2.5 h-2.5 rounded-full shrink-0"
-                style={{
-                  background: color,
-                  boxShadow: role === 'Leaf' ? 'none' : `0 0 5px ${color}66`,
-                }}
-              />
-              {role}
-            </span>
-          ))}
-        </div>
-
-        <div className="w-px h-7 bg-gray-800 shrink-0 mx-1" />
-
-        {/* ── All nodes toggle ── */}
-        <button
-          onClick={() => { setShowAllNodes(v => !v); setSelectedNode(null) }}
-          className="shrink-0 flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl border transition-all duration-150 font-medium active:scale-95"
-          style={showAllNodes
-            ? { background: '#f59e0b', color: '#030712', border: '1px solid #f59e0b', boxShadow: '0 0 12px rgba(245,158,11,0.3)' }
-            : { background: 'transparent', color: '#94a3b8', border: '1px solid #1e293b' }
-          }
-        >
-          <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-            <circle cx="4" cy="8" r="2.5" stroke="currentColor" strokeWidth="1.5"/>
-            <circle cx="12" cy="4" r="2.5" stroke="currentColor" strokeWidth="1.5"/>
-            <circle cx="12" cy="12" r="2.5" stroke="currentColor" strokeWidth="1.5"/>
-            <line x1="6.2" y1="7.1" x2="10.2" y2="4.9" stroke="currentColor" strokeWidth="1.2"/>
-            <line x1="6.2" y1="8.9" x2="10.2" y2="11.1" stroke="currentColor" strokeWidth="1.2"/>
-          </svg>
-          All nodes
-        </button>
-      </header>
-
-      {/* ══ GRAPH CANVAS ════════════════════════════════════════════════════ */}
-      <main className="flex-1 relative" style={{ minHeight: 0 }}>
-
-        {/* Node info panel */}
-        {selectedNode && (
-          <NodeInfoPanel node={selectedNode} onClose={handleClear} />
-        )}
-
-        <GraphView
-          graphData={filteredData}
-          selectedNode={selectedNode}
-          onNodeClick={setSelectedNode}
-        />
-      </main>
-
-      {/* ══ FOOTER ══════════════════════════════════════════════════════════ */}
-      <footer
-        className="shrink-0 flex items-center justify-between px-5 border-t border-gray-800/60"
-        style={{ height: '32px', background: 'rgba(3,7,18,0.98)' }}
-      >
-        <span className="text-slate-600 text-xs">
-          <span className="text-slate-500 font-medium">Lattice</span>
-          {' · '}The Lightning Network, visualized.
-        </span>
-        <span className="text-slate-700 text-xs hidden sm:block">
-          Exploring {graphData?.nodes.length.toLocaleString()} nodes and {graphData?.edges.length.toLocaleString()} channels on the Bitcoin Lightning Network
-        </span>
-      </footer>
-
     </div>
   )
 }
-
-export default App
